@@ -30,7 +30,6 @@ class CosmicSprite(pg.sprite.Sprite):
 
 
     def _update_rect(self):
-        self.rect = self.image.get_rect()
         self.rect.left = self.position[0] - self.rect.width/2.
         self.rect.top = self.position[1] - self.rect.height/2.
 
@@ -54,8 +53,7 @@ class CosmicSprite(pg.sprite.Sprite):
         self._angle_before_update = self.angle
         self.position = self.position + self.velocity*dt
         angle_increment = self.angular_velocity*dt
-        self.angle = (self.angle + angle_increment) % 2*np.pi
-        print(np.rad2deg(self.angle))
+        self.angle = (self.angle + angle_increment) % (2*np.pi)
 
         self.image = pg.transform.rotate(self._base_image, np.rad2deg(self.angle))
         self._update_rect()
@@ -135,12 +133,12 @@ def main():
     ships = pg.sprite.Group()
     ships.add(Ship(CosmicSprite(sprite_img=images_dict['ship'],
                                 position=[30., 30.],
-                                angular_velocity=0.001)))
+                                angular_velocity=0.1)))
     planets = pg.sprite.Group()
     planets.add(CosmicSprite(sprite_img=images_dict['planet'],
                              position=[screen_size[0]/2,
                                        screen_size[1]/2],
-                             angular_velocity=0.00000001),
+                             angular_velocity=0.05),
                              )
 
     clock = pg.time.Clock()
@@ -155,7 +153,6 @@ def main():
 
         pg.display.update()
 
-        pg.time.delay(1000)
         clock.tick(24)
 
 
