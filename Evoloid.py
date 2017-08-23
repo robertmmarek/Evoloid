@@ -14,6 +14,7 @@ class CosmicSprite(pg.sprite.Sprite):
                  friction=.2,
                  ):
         pg.sprite.Sprite.__init__(self)
+        self._base_image = sprite_img
         self.image = sprite_img
         self.rect = self.image.get_rect()
         self.mass = mass
@@ -27,7 +28,9 @@ class CosmicSprite(pg.sprite.Sprite):
         self._angle_before_update = angle
         self._update_rect()
 
+
     def _update_rect(self):
+        self.rect = self.image.get_rect()
         self.rect.left = self.position[0] - self.rect.width/2.
         self.rect.top = self.position[1] - self.rect.height/2.
 
@@ -52,8 +55,9 @@ class CosmicSprite(pg.sprite.Sprite):
         self.position = self.position + self.velocity*dt
         angle_increment = self.angular_velocity*dt
         self.angle = (self.angle + angle_increment) % 2*np.pi
+        print(np.rad2deg(self.angle))
 
-        self.image = pg.transform.rotate(self.image, angle_increment)
+        self.image = pg.transform.rotate(self._base_image, np.rad2deg(self.angle))
         self._update_rect()
 
 class CosmicSpriteDecorator(CosmicSprite):
@@ -131,12 +135,12 @@ def main():
     ships = pg.sprite.Group()
     ships.add(Ship(CosmicSprite(sprite_img=images_dict['ship'],
                                 position=[30., 30.],
-                                angular_velocity=0.01)))
+                                angular_velocity=0.001)))
     planets = pg.sprite.Group()
     planets.add(CosmicSprite(sprite_img=images_dict['planet'],
                              position=[screen_size[0]/2,
                                        screen_size[1]/2],
-                             angular_velocity=0.01),
+                             angular_velocity=0.00000001),
                              )
 
     clock = pg.time.Clock()
@@ -146,12 +150,13 @@ def main():
         ships.draw(screen)
         planets.draw(screen)
 
-        #ships.update(0.5)
-        planets.update(0.5)
+        ships.update(0.04)
+        planets.update(0.04)
 
         pg.display.update()
 
-        clock.tick(30)
+        pg.time.delay(1000)
+        clock.tick(24)
 
 
 
