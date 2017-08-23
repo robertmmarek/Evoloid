@@ -19,6 +19,7 @@ class CosmicSprite(pg.sprite.Sprite):
         self.angular_velocity = np.array(angular_velocity)
         self.position = np.array(position)
         self.angle = np.array(angle)
+        #fix that
         self.radius = max(self.rect)
 
     def update_gravity(self, dt=.04, gravity_objects=[]):
