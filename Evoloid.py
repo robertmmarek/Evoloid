@@ -1,12 +1,13 @@
 import pygame as pg
 import numpy as np
+import copy as copy
 import random as rnd
 
 
 class View(pg.sprite.Sprite):
-
-    def __init__(self):
+    def __init__(self, cosmic_object):
         pg.sprite.Sprite.__init__(self)
+        self.cosmic_object = cosmic_object
 
     def update_sprite(self, scale=1.):
         pass
@@ -17,18 +18,16 @@ class View(pg.sprite.Sprite):
 
 class CosmicObjectImageView(View):
     def __init__(self, cosmic_object, image):
-        View.__init__(self)
-        self.cosmic_object = cosmic_object
+        View.__init__(self, cosmic_object)
         self._base_image = image
         self.image = image
         self.rect = self.image.get_rect()
 
     def update_sprite(self, scale=1.):
         View.update_sprite(scale)
-
-        angle_in_deg = np.rad2deg(self.cosmic_object.angle)
+        angle_in_deg = np.rad2deg(self.cosmic_object.angle + np.pi/2.)
         previous_center = (self.cosmic_object.position[0]*scale, self.cosmic_object.position[1]*scale)
-        self.image = pg.transform.rotate(self._base_image, angle_in_deg)
+        self.image = pg.transform.rotate(self._base_image, -angle_in_deg)
         image_rect = self.image.get_rect()
         base_image_rect = self._base_image.get_rect()
         max_dimension = max(base_image_rect.width, base_image_rect.height)
@@ -41,6 +40,53 @@ class CosmicObjectImageView(View):
 
     def draw(self, screen):
         screen.blit(self.image, self.rect)
+
+
+class ShipImageView(CosmicObjectImageView):
+    def __init__(self,
+                 ship,
+                 ship_image,
+                 position_thrust_image,
+                 angular_thrust_image_positive,
+                 angular_thrust_image_negative):
+        CosmicObjectImageView.__init__(self, ship, ship_image)
+        self.ship = ship
+        self.position_thrust_image = position_thrust_image
+        self.angular_thrust_image_negative = angular_thrust_image_negative
+        self.angular_thrust_image_positive = angular_thrust_image_positive
+
+        self.position_thrust_view = None
+        self.angular_thrust_view = None
+
+    def update_sprite(self, scale=1.):
+        CosmicObjectImageView.update_sprite(self, scale)
+        angular_thrust_image = self.angular_thrust_image_positive
+        if self.ship.fuel > 0. and np.abs(self.ship.angular_thrusters) > 0.:
+            angular_thrust_object = copy.deepcopy(self.ship.cosmic_object)
+            self.angular_thrust_view = CosmicObjectImageView(angular_thrust_object, angular_thrust_image)
+        else:
+            self.angular_thrust_view = None
+
+        if self.ship.fuel > 0. and np.abs(self.ship.position_thrusters) > 0.:
+            position_thrust_object = copy.deepcopy(self.ship.cosmic_object)
+            position_thrust_object.position += -.75*self.ship.radius*self.ship.direction
+            self.position_thrust_view = CosmicObjectImageView(position_thrust_object, self.position_thrust_image)
+            self.position_thrust_view.update_sprite()
+        else:
+            self.position_thrust_view = None
+
+    def draw(self, screen):
+        if self.angular_thrust_view is not None:
+            self.angular_thrust_view.draw(screen)
+
+        if self.position_thrust_view is not None:
+            self.position_thrust_view.draw(screen)
+
+        CosmicObjectImageView.draw(self, screen)
+
+
+
+
 
 
 class CosmicObject(pg.sprite.Sprite):
@@ -87,7 +133,12 @@ class CosmicObject(pg.sprite.Sprite):
         self._position_before_update = self.position[:]
         self._angle_before_update = angle
 
+        self.direction = self._calc_direction_vector()
+
         self._update_rect()
+
+    def _calc_direction_vector(self):
+        return np.array([np.cos(self.angle), np.sin(self.angle)])
 
     def _fix_collision(self, other):
         collision_vector = other.position-self.position
@@ -134,6 +185,7 @@ class CosmicObject(pg.sprite.Sprite):
         angle_increment = self.angular_velocity*dt
         self.angle = (self.angle + angle_increment) % (2*np.pi)
         self._update_rect()
+        self.direction = self._calc_direction_vector()
 
 
 class CosmicObjectDecorator(CosmicObject):
@@ -142,10 +194,14 @@ class CosmicObjectDecorator(CosmicObject):
 
 
 class Ship(CosmicObjectDecorator):
-    angular_thruster_cost = 1.
-    position_thruster_cost = 1.
+    angular_thruster_cost = 50.
+    position_thruster_cost = 400.
     crash_fuel_cost = 1.
     crash_threshold = 1.
+    velocity_boost_fuel_cost = 1.
+    steal_fuel_multiplier = 1.3
+    bullet_timeout_multiplier = 2.
+    bullet_radius = 2.
 
     def __init__(self,
                  cosmic_object,
@@ -186,13 +242,10 @@ class Ship(CosmicObjectDecorator):
         angular_thrust = self.angular_thrusters*dt
         self.fuel -= max(0., np.abs(angular_thrust)*Ship.angular_thruster_cost)
 
-        origin = self.cosmic_object.position
         direction = np.array([0., 1.])
         angle = self.cosmic_object.angle
-        rotated_direction = np.array([direction[0]*np.cos(angle) - direction[1]*np.sin(angle),
-                                      direction[1]*np.cos(angle) + direction[0]*np.sin(angle)]).reshape(2)
 
-        position_velocity_inc = rotated_direction*position_thrust
+        position_velocity_inc = self.direction*position_thrust
 
         angular_velocity_inc = angular_thrust
 
@@ -201,6 +254,17 @@ class Ship(CosmicObjectDecorator):
             self.cosmic_object.angular_velocity += angular_velocity_inc
 
         self.cosmic_object.update(dt, gravity_objects)
+
+        def shoot(self, fuel_to_use):
+            bullet_space_object = copy.deepcopy(self.cosmic_object)
+            bullet_space_object.radius = Ship.bullet_radius
+            bullet_space_object.position += self.direction*1.1*(self.radius+Ship.bullet_radius)
+            bullet_space_object.velocity += bullet_space_object.direction*(fuel_to_use/Ship.velocity_boost_fuel_cost)
+            bullet = FuelStealerBullet(bullet_space_object,
+                                       self,
+                                       fuel_to_use*Ship.steal_fuel_multiplier,
+                                       fuel_to_use*Ship.bullet_timeout_multiplier)
+            return bullet
 
 
 class FuelStealerBullet(CosmicObjectDecorator):
@@ -216,6 +280,7 @@ class FuelStealerBullet(CosmicObjectDecorator):
             previous_fuel = other.fuel
             other.fuel -= self.fuel_to_steal
             self.origin_ship.fuel += (previous_fuel-other.fuel)
+            self.deadly = False
         self.cosmic_object.on_collision(other)
 
     def update(self, dt=0.04, gravity_objects=[]):
@@ -233,27 +298,35 @@ def main():
 
     images_dict = {
         'ship': pg.image.load(r'./img/ship.png'),
-        'planet': pg.image.load(r'./img/planet.png')
+        'planet': pg.image.load(r'./img/planet.png'),
+        'position_thrust': pg.image.load(r'./img/position_thrust.png'),
+        'angular_negative_thrust': pg.image.load(r'./img/angular_negative_thrust.png'),
+        'angular_positive_thrust': pg.image.load(r'./img/angular_positive_thrust.png')
     }
 
-    ships = [Ship(CosmicObject(position=[320., 100.],
+    ships = [Ship(CosmicObject(position=[320., 50.],
                                radius=10.,
-                               angular_velocity=0.005,
-                               velocity=[0.1, -0.15],
-                               mass=1.5)),
-             Ship(CosmicObject(position=[320., 50.],
-                               radius=10.,
-                               angular_velocity=0.005,
-                               velocity=[0.05, 0.],
-                               mass=1.))
+                               angular_velocity=0.00,
+                               velocity=[0., 0.],
+                               mass=1.,
+                               angle=-0.75),
+                               position_thrusters=0.00005,
+                               angular_thrusters=0.000001
+                               )
              ]
     planets = [CosmicObject(position=[320., 320.],
                             radius=30.,
                             mass=500.,
                             angular_velocity=0.,
-                            fixed=False)]
+                            fixed=True)]
 
-    ships_view = [CosmicObjectImageView(ship, images_dict['ship']) for ship in ships]
+    ships_view = [ShipImageView(ship,
+                                images_dict['ship'],
+                                images_dict['position_thrust'],
+                                images_dict['angular_negative_thrust'],
+                                images_dict['angular_positive_thrust']) for ship in ships]
+    # ships_view = [CosmicObjectImageView(ship,
+    #                                     images_dict['ship']) for ship in ships]
     planets_view = [CosmicObjectImageView(planet, images_dict['planet']) for planet in planets]
 
     global_clock = pg.time.Clock()
