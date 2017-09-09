@@ -12,8 +12,49 @@ class View(pg.sprite.Sprite):
     def update_sprite(self, scale=1.):
         pass
 
-    def draw(self, screen):
+    def draw(self, screen, offset=[0., 0.]):
         pass
+
+
+class AutoScalingWorldView(View):
+    def __init__(self, sub_views, max_scale=1.5, min_scale=0.1, output_size=(640., 480.)):
+        self.buffer_screen = pg.Surface(output_size)
+        self.sub_views = sub_views
+        self.max_scale = max_scale
+        self.min_scale = min_scale
+        self.output_size = output_size
+        self._mean_pos = np.array([0., 0.])
+
+    def update_sprite(self, scale=1.):
+        self.buffer_screen.fill((0., 0., 0.))
+        mean_pos = np.array([0., 0.])
+        max_x = max([view.cosmic_object.position[0] for view in self.sub_views])
+        min_x = min([view.cosmic_object.position[0] for view in self.sub_views])
+        max_y = max([view.cosmic_object.position[1] for view in self.sub_views])
+        min_y = min([view.cosmic_object.position[1] for view in self.sub_views])
+
+        x_range = (max_x-min_x)*2
+        y_range = (max_y-min_y)*2
+        scale_value = np.linalg.norm([x_range, y_range])
+
+        autoscale = 0.9*min(self.output_size[0]/scale_value, self.output_size[1]/scale_value)
+        autoscale = scale*max(self.min_scale, min(self.max_scale, autoscale))
+
+        for view in self.sub_views:
+            mean_pos += view.cosmic_object.position*view.cosmic_object.mass
+            view.update_sprite(autoscale)
+
+        mean_pos /= float(sum([view.cosmic_object.mass for view in self.sub_views]))
+        self._mean_pos = mean_pos
+
+        draw_offset = np.array(self.output_size)/2. - mean_pos*autoscale
+
+        for view in self.sub_views:
+            view.draw(self.buffer_screen, draw_offset)
+
+    def draw(self, screen, offset=[0., 0.]):
+        View.draw(self, screen)
+        screen.blit(self.buffer_screen, offset)
 
 
 class CosmicObjectImageView(View):
@@ -38,8 +79,10 @@ class CosmicObjectImageView(View):
         self.rect = self.image.get_rect()
         self.rect.center = previous_center
 
-    def draw(self, screen):
-        screen.blit(self.image, self.rect)
+    def draw(self, screen, offset=[0., 0.]):
+        moved_rect = self.rect.copy()
+        moved_rect = moved_rect.move(offset[0], offset[1])
+        screen.blit(self.image, moved_rect)
 
 
 class ShipImageView(CosmicObjectImageView):
@@ -60,10 +103,14 @@ class ShipImageView(CosmicObjectImageView):
 
     def update_sprite(self, scale=1.):
         CosmicObjectImageView.update_sprite(self, scale)
-        angular_thrust_image = self.angular_thrust_image_positive
+
         if self.ship.fuel > 0. and np.abs(self.ship.angular_thrusters) > 0.:
+            angular_thrust_image = self.angular_thrust_image_positive
+            if self.ship.angular_thrusters < 0.:
+                angular_thrust_image = self.angular_thrust_image_negative
             angular_thrust_object = copy.deepcopy(self.ship.cosmic_object)
             self.angular_thrust_view = CosmicObjectImageView(angular_thrust_object, angular_thrust_image)
+            self.angular_thrust_view.update_sprite(scale)
         else:
             self.angular_thrust_view = None
 
@@ -71,22 +118,18 @@ class ShipImageView(CosmicObjectImageView):
             position_thrust_object = copy.deepcopy(self.ship.cosmic_object)
             position_thrust_object.position += -.75*self.ship.radius*self.ship.direction
             self.position_thrust_view = CosmicObjectImageView(position_thrust_object, self.position_thrust_image)
-            self.position_thrust_view.update_sprite()
+            self.position_thrust_view.update_sprite(scale)
         else:
             self.position_thrust_view = None
 
-    def draw(self, screen):
+    def draw(self, screen, offset=[0., 0.]):
         if self.angular_thrust_view is not None:
-            self.angular_thrust_view.draw(screen)
+            self.angular_thrust_view.draw(screen, offset)
 
         if self.position_thrust_view is not None:
-            self.position_thrust_view.draw(screen)
+            self.position_thrust_view.draw(screen, offset)
 
-        CosmicObjectImageView.draw(self, screen)
-
-
-
-
+        CosmicObjectImageView.draw(self, screen, offset)
 
 
 class CosmicObject(pg.sprite.Sprite):
@@ -309,9 +352,9 @@ def main():
                                angular_velocity=0.00,
                                velocity=[0., 0.],
                                mass=1.,
-                               angle=-0.75),
-                               position_thrusters=0.00005,
-                               angular_thrusters=0.000001
+                               angle=-.75),
+                               position_thrusters=0.0001,
+                               angular_thrusters=0.000003
                                )
              ]
     planets = [CosmicObject(position=[320., 320.],
@@ -325,9 +368,12 @@ def main():
                                 images_dict['position_thrust'],
                                 images_dict['angular_negative_thrust'],
                                 images_dict['angular_positive_thrust']) for ship in ships]
-    # ships_view = [CosmicObjectImageView(ship,
-    #                                     images_dict['ship']) for ship in ships]
     planets_view = [CosmicObjectImageView(planet, images_dict['planet']) for planet in planets]
+
+    world_view = AutoScalingWorldView(ships_view+planets_view,
+                                      max_scale=1.5,
+                                      min_scale=.1,
+                                      output_size=screen_size)
 
     global_clock = pg.time.Clock()
 
@@ -348,9 +394,8 @@ def main():
             for element_b in collide_group:
                 CosmicObject.collision(element_a, element_b)
 
-        for view in ships_view+planets_view:
-            view.update_sprite(scale=1.)
-            view.draw(screen)
+        world_view.update_sprite(1.)
+        world_view.draw(screen)
 
         pg.display.update()
 
